@@ -1,14 +1,10 @@
-# ◈ TrapLens
+# TrapLens
 
-**Think Before You Click.** A Streamlit scam-awareness app powered by Google's real
-`gemma-4-26b-a4b-it` through the official `google-genai` SDK. Paste a message, upload a
-screenshot, or try an example. Get an explained risk level, exact evidence, and safety steps.
-No database, accounts, fake results, or numerical scam probabilities.
-
+** A Streamlit Deployed scam-awareness app powered by Google's real
+`gemma-4-26b-a4b-it` through the official `google-genai` Software Development Kit. Users can paste a message, upload a
+screenshot, or try an example. 
 ## Quick start (macOS / Linux)
-
 Use Python 3.10 or newer. Open Terminal and run:
-
 ```sh
 cd TrapLens
 python3 -m venv .venv
@@ -21,8 +17,7 @@ If `.venv` already exists, just activate it and install the requirements.
 ### Configure your Google API key
 
 1. Open [Google AI Studio](https://aistudio.google.com/apikey), sign in, and create an API key for a Google project with Gemini API access.
-2. Set **GEMINI_API_KEY in the same terminal where you will start the app**. On macOS's default zsh, this prompts without displaying your key or putting it in command history:
-
+2. 
 ```sh
 read -s 'GEMINI_API_KEY?Paste your Google API key, then press Enter: '
 export GEMINI_API_KEY
