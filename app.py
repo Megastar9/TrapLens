@@ -2,6 +2,7 @@
 import hashlib
 import html
 import os
+import uuid
 
 import streamlit as st
 from highlighting import highlighting_html
@@ -106,7 +107,7 @@ elif stored:
     result = stored[1]
     st.divider()
     st.markdown('<span class="eyebrow">02 / Your analysis</span>', unsafe_allow_html=True)
-    st.header("A closer look")
+    st.header("A closer look", anchor="analysis-results")
     colors = {"Low": "#93f5c5", "Medium": "#f5cb78", "High": "#ff9797", "Uncertain": "#b8adff"}
     a, b = st.columns([1, 2])
     with a:
@@ -139,5 +140,27 @@ elif stored:
             st.caption("AI-generated transcription. Compare it with your screenshot before relying on it.")
             st.text(result.image_transcription)
     st.download_button("Download analysis · JSON", result.model_dump_json(indent=2), "traplens-analysis.json", "application/json")
+    if analyze:
+        # A fresh iframe runs once per successful submission, including re-analysis.
+        # Fixed markup only: no message content is interpolated into JavaScript.
+        st.iframe(
+            "<!-- " + uuid.uuid4().hex + " -->" + """
+            <script>
+            let attempts = 0;
+            function revealResults() {
+                const target = window.parent.document.getElementById('analysis-results');
+                if (!target) {
+                    if (++attempts < 30) window.setTimeout(revealResults, 100);
+                    return;
+                }
+                target.style.scrollMarginTop = '80px';
+                const reducedMotion = window.parent.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                target.scrollIntoView({behavior: reducedMotion ? 'instant' : 'smooth', block: 'start'});
+            }
+            window.setTimeout(revealResults, 150);
+            </script>
+            """,
+            height=1, tab_index=-1, alt="Navigate to completed analysis",
+        )
 st.divider()
 st.caption("◈ TrapLens  ·  Think Before You Click.    |    Built for awareness. Designed to explain.")
