@@ -53,6 +53,30 @@ class BackendTests(unittest.TestCase):
         with self.assertRaises(AnalysisError):
             parse_response(json.dumps(data), '', False)
 
+    def test_whitespace_quote_restores_original(self):
+        data = payload()
+        original = "Send your\n  password now."
+        result = parse_response(json.dumps(data), original, False)
+        self.assertEqual(result.red_flags[0].quote, 'your\n  password')
+        self.assertIn(result.red_flags[0].quote, original)
+
+    def test_no_fuzzy_matching_or_joining_evidence(self):
+        for original in ('Send YOUR password now.', 'Send your temporary password now.'):
+            with self.assertRaisesRegex(AnalysisError, 'quote absent'):
+                parse_response(json.dumps(payload()), original, False)
+
+    def test_safe_specific_validation_errors(self):
+        data = payload()
+        del data['limitations']
+        with self.assertRaisesRegex(AnalysisError, 'invalid fields: limitations'):
+            parse_response(json.dumps(data), MESSAGE, False)
+        data = payload()
+        data['private-model-content'] = 'secret'
+        with self.assertRaises(AnalysisError) as ctx:
+            parse_response(json.dumps(data), MESSAGE, False)
+        self.assertNotIn('private-model-content', str(ctx.exception))
+        self.assertNotIn('secret', str(ctx.exception))
+
     def test_image_validation(self):
         out = io.BytesIO()
         Image.new('RGB', (20, 20), 'white').save(out, format='PNG')
@@ -109,6 +133,7 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(analyze_message(MESSAGE).risk_level, 'High')
         self.assertEqual(model.generate_content.call_count, 2)
         self.assertIn('previous response failed', model.generate_content.call_args.kwargs['config'].system_instruction)
+        self.assertIn('quote absent', model.generate_content.call_args.kwargs['config'].system_instruction)
 
     @patch.dict(os.environ, {'GEMINI_API_KEY': 'unit-test-placeholder'})
     @patch('analyzer.genai.Client')

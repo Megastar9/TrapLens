@@ -57,11 +57,15 @@ Use no red flags when none are supported. High and Medium require quoted evidenc
 Recommend concrete, proportionate safety actions. Do not recommend opening suspect
 links, replying with secrets, or calling numbers supplied in the suspicious message.
 Return ONLY one JSON object matching this schema, with every field required:
-{"risk_level":"Low|Medium|High|Uncertain", "summary":"brief explanation",
- "red_flags":[{"title":"tactic", "quote":"exact source phrase", "source":"text|image",
+{"risk_level":"High", "summary":"brief explanation",
+ "red_flags":[{"title":"tactic", "quote":"exact source phrase", "source":"text",
  "explanation":"why this phrase matters, without claiming certainty"}],
  "recommended_actions":["action"], "image_transcription":"literal text or empty",
  "limitations":"what cannot be determined from this content"}.
+Choose one allowed risk_level value, not a pipe-separated list. Choose either text or
+image for each source. Always include image_transcription (empty string for text-only
+input) and limitations. Keep quotes short, about 2-12 words, copied from the source.
+Use at most 5 red flags and 3 concise safety actions.
 """
 
 
@@ -88,21 +92,46 @@ def prepare_image(data: bytes) -> tuple[bytes, str]:
         raise AnalysisError("This image could not be read. Try a new screenshot.") from None
 
 
+def match_source_quote(quote: str, source: str) -> str | None:
+    """Recover original source spelling when only whitespace differs; no fuzzy matching."""
+    if quote in source:
+        return quote
+    # Keep every non-whitespace character exact, including URL punctuation and case.
+    chunks = re.split(r"(\s+)", quote)
+    pattern = ''.join(r"\s+" if chunk.isspace() else re.escape(chunk) for chunk in chunks)
+    match = re.search(pattern, source)
+    return match.group(0) if match else None
+
+
 def parse_response(raw: str, text: str, has_image: bool) -> Analysis:
     raw = raw.strip()
     if raw.startswith("```"):
         raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
         raw = re.sub(r"\s*```$", "", raw)
     try:
-        result = Analysis.model_validate(json.loads(raw), strict=True)
-    except (ValueError, ValidationError):
-        raise AnalysisError("Gemma returned an incomplete or invalid analysis. Please try again.") from None
+        data = json.loads(raw)
+    except ValueError:
+        raise AnalysisError("Gemma returned invalid JSON formatting. Return one complete JSON object without prose.") from None
+    try:
+        result = Analysis.model_validate(data, strict=True)
+    except ValidationError as exc:
+        # Never display the raw model payload, field values, or unknown field names.
+        known_fields = set(Analysis.model_fields) | set(RedFlag.model_fields)
+        fields = sorted({str(part) for err in exc.errors() for part in err['loc']
+                         if isinstance(part, str) and part in known_fields})
+        location = ', '.join(fields) if fields else 'response structure'
+        raise AnalysisError("Gemma returned missing or invalid fields: " + location + ". Follow the required JSON schema.") from None
     if not has_image and result.image_transcription:
         raise AnalysisError("Gemma referenced an image that was not provided. Please try again.")
     for flag in result.red_flags:
         source = text if flag.source == "text" else result.image_transcription
-        if (flag.source == "image" and not has_image) or flag.quote not in source:
-            raise AnalysisError("Gemma returned evidence that could not be matched to its source. Please try again.")
+        if flag.source == "image" and not has_image:
+            raise AnalysisError("Gemma assigned evidence to an image that was not provided. Use source=text for pasted messages.")
+        matched_quote = match_source_quote(flag.quote, source)
+        if matched_quote is None:
+            raise AnalysisError("Gemma returned a quote absent from its source. Copy a short, contiguous phrase exactly; do not paraphrase or combine passages.")
+        # The displayed quote is always an actual substring, preserving highlights.
+        flag.quote = matched_quote
     if result.risk_level in {"High", "Medium"} and not result.red_flags:
         raise AnalysisError("Gemma returned a risk assessment without evidence. Please try again.")
     if any(not action.strip() or len(action) > 1500 for action in result.recommended_actions):
@@ -125,6 +154,7 @@ def analyze_message(text: str = "", image_bytes: bytes | None = None) -> Analysi
         parts.append(types.Part.from_bytes(data=data, mime_type=mime))
     try:
         with genai.Client(api_key=key, http_options=types.HttpOptions(timeout=60000)) as client:
+            validation_feedback = ""
             for attempt in range(2):
                 instruction = INSTRUCTIONS
                 if attempt:
@@ -136,6 +166,7 @@ def analyze_message(text: str = "", image_bytes: bytes | None = None) -> Analysi
                         "If a finding cannot be supported by an exact quote, omit that finding and "
                         "reconsider the risk and summary. Use Uncertain if evidence is insufficient. "
                         "Return all required JSON fields and no surrounding prose."
+                        "\nSpecific validation failure: " + validation_feedback
                     )
                 response = client.models.generate_content(
                     model=MODEL,
@@ -150,11 +181,12 @@ def analyze_message(text: str = "", image_bytes: bytes | None = None) -> Analysi
                     if not raw:
                         raise AnalysisError("Gemma returned no analysis. Try clearer text or a more readable screenshot.")
                     return parse_response(raw, text, image_bytes is not None)
-                except AnalysisError:
+                except AnalysisError as exc:
+                    validation_feedback = str(exc)
                     if attempt:
                         raise AnalysisError(
-                            "Gemma could not produce a valid, source-matched analysis after two attempts. "
-                            "No assessment has been displayed. Try a shorter message or a clearer screenshot."
+                            "Analysis failed after two attempts. " + validation_feedback +
+                            " No assessment has been displayed."
                         ) from None
     except AnalysisError:
         raise

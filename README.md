@@ -83,11 +83,13 @@ and message to Google with analysis instructions. It requests JSON in the prompt
 validates the response using Pydantic. No reliance on server-side JSON-schema support.
 Malformed JSON, missing fields, ungrounded quotes, empty responses, and API errors produce
 safe retry messages, never fabricated fallback assessments. Requests have a 60-second
-HTTP timeout. Gemma thinking is disabled using `thinking_level="minimal"` to reduce latency. Invalid or ungrounded model output triggers one corrective retry (up to two API calls,
+HTTP timeout. Gemma thinking is disabled using `thinking_level="minimal"` to reduce latency. Invalid or ungrounded model output triggers one corrective retry with the specific validation error (up to two API calls,
 which may consume additional quota). If both attempts fail validation, no assessment is shown.
 API connection and permission errors are not automatically retried.
 
-Each text quote must be an exact substring of the original input. Screenshot quotes must
+Each displayed text quote must be an exact substring of the original input.
+Whitespace-only differences in model quotes are mapped back to the original source;
+paraphrases and changes to non-whitespace characters are rejected. Screenshot quotes must
 match Gemma's transcription, which **is not independent OCR verification** and can be wrong.
 Model explanations and classifications remain AI-generated and are not guaranteed accurate.
 The prompt instructs Gemma to treat message instructions as untrusted and never claim external
